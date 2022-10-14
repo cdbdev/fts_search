@@ -1,6 +1,7 @@
+import logging
 import queue
 import tkinter as tk
-import os as os
+import subprocess
 from tkinter import ttk
 from tkinter.messagebox import showwarning
 from tkinter.filedialog import askdirectory
@@ -17,6 +18,7 @@ class GuiBuilder():
         self.root = tk.Tk()
         self.root.title("ftsSearch - Search for text in files")
         self.root.geometry("{}x{}+{}+{}".format(1200, 640, 40, 40))
+        self.root.configure(bg='white')
         self.root.resizable(0,0)
     
     def create(self):
@@ -50,8 +52,9 @@ class Application(tk.Frame):
     """
     
     # Constants
-    START_DIR = "C:/"
-    FILE_TYPES = "*.md,*.markdown,*.txt"
+    START_DIR = "C:\\"
+    FILE_TYPES = "*.md"
+    #~ FILE_TYPES = "*.md,*.markdown,*.txt"
     DELAY = 100
 
     X_PAD_ZERO = (0, 0)
@@ -82,10 +85,12 @@ class Application(tk.Frame):
         # Search: LabelFrame
         self.lf_search = tk.LabelFrame(self.master, text= "Search")
         self.lf_search.grid(row = 0, column = 0, sticky="WE", columnspan = 5, padx = Application.X_PAD_LR , pady = Application.Y_PAD_TOP)
+        self.lf_search.configure(bg='white')
 
         # Path: Label + Entry + Button
         self.lbl_search_path = tk.Label(self.lf_search, text = "Path:")
         self.lbl_search_path.grid(row = 0, column = 0, sticky="W", padx = Application.X_PAD_LBL, pady = Application.Y_PAD_TOP)
+        self.lbl_search_path.configure(bg='white')
 
         self.txt_search_path = tk.Entry(self.lf_search, width = 120)
         self.txt_search_path.insert(tk.END, Application.START_DIR)
@@ -98,6 +103,7 @@ class Application(tk.Frame):
         # Filetype: Label + Entry
         self.lbl_file_types = tk.Label(self.lf_search, text = "File Types:")
         self.lbl_file_types.grid(row = 0, column = 2, sticky="W", padx = Application.X_PAD_LBL_L, pady = Application.Y_PAD_TOP)
+        self.lbl_file_types.configure(bg='white')
 
         self.txt_file_types = tk.Entry(self.lf_search, width = 30)
         self.txt_file_types.insert(tk.END, Application.FILE_TYPES)
@@ -107,10 +113,12 @@ class Application(tk.Frame):
         # Search text: Label + Entry
         self.lbl_search_text = tk.Label(self.lf_search, text = "Text:")
         self.lbl_search_text.grid(row = 1, column = 0, sticky="W", padx = Application.X_PAD_LBL, pady = Application.Y_PAD_TOP_BOT)
+        self.lbl_search_text.configure(bg='white')
 
         self.txt_search_text = tk.Entry(self.lf_search, width = 100)
         self.txt_search_text.focus_set()
         self.txt_search_text.grid(row = 1, column = 1, sticky="W", columnspan = 3, padx = Application.X_PAD_RIGHT, pady = Application.Y_PAD_TOP_BOT)
+        self.txt_search_text.configure(bg='white')
 
         # Search: Button
         self.btn_search = tk.Button(self.lf_search, text = "Search", command = self.on_search, width = 8)
@@ -129,7 +137,7 @@ class Application(tk.Frame):
         self.cnt_treeview = TreeViewContainer(self.master)
         self.cnt_treeview.grid(row = 4, column = 0, columnspan = 5, padx = Application.X_PAD_LR, pady = Application.Y_PAD_TOP, sticky = "WE")
         self.cnt_treeview.bind_single_click(self.on_select_item)
-        self.cnt_treeview.bind_double_click(self.on_double_click_item)
+        #~ self.cnt_treeview.bind_double_click(self.on_double_click_item)
         
         # =====================================================
         # Text inside Frame with found text in selected file
@@ -171,7 +179,6 @@ class Application(tk.Frame):
             # Call Executor            
             input = (self.txt_search_path.get(), self.txt_file_types.get(), self.txt_search_text.get())
             self.executor = PyProcessExecutor(input, self.q)
-            self.executor.setDaemon(True)
             self.executor.start()
 
             # Prepare GUI for result
@@ -213,49 +220,46 @@ class Application(tk.Frame):
         if not self.executor.is_alive():
             max_length = 0
 
-            while True:
-                try:
+            try:
+                for data in iter(self.q.get_nowait, PyProcessExecutor.SENTINEL):
                     # Check for cancel while reading out queue
                     if self.cancelled == True:
                         self.q.queue.clear()
                         self.toggle_search()            
                         return
 
-                    # Read data from queue
-                    data = self.q.get_nowait()
-
-                    # Stop delay if 'Sentinel' (last) result is reached
-                    if data.key == PyProcessExecutor.SENTINEL:
-                        self.toggle_search()
-                        self.update_status(f"Search done (matches: { len(self.cnt_treeview.tvw_results.get_children()) })")
-                        self.cnt_treeview.apply_width(max_length)
-                        return
-                    
-                    # Determine max length of TreeView
-                    if len(data.key) > max_length:
-                        max_length = len(data.key)
-
                     # Insert data into TreeView and result
                     self.results.append(data)
                     self.cnt_treeview.insert(parent = "", index = tk.END, text = data.key)
+                        
                     self.cnt_treeview.update()
-                except queue.Empty:
-                    break
+
+                    # Determine max length of TreeView to determine largest entry
+                    if len(data.key) > max_length:
+                        max_length = len(data.key)
+
+                # Queue succesfully read until the end ('Sentinel' result is reached)
+                self.toggle_search()
+                self.update_status(f"Search done (matches: { len(self.cnt_treeview.tvw_results.get_children()) })")
+                self.cnt_treeview.apply_width(max_length)
+
+                return
+            except queue.Empty:
+                self.update_status("Search failed.")
+                return
 
         self.master.after(Application.DELAY, self.on_after_elapsed)
 
     def on_select_item(self, event: tk.Event):
         current_key = self.cnt_treeview.get_current_item().get("text")
+        self.cnt_text.file = current_key.replace("\\","/")
+        
         for data in self.results:
             if data.key == current_key:
                 self.cnt_text.insert_text(data.dat)                
                 break
         
         self.cnt_text.highlight_text(self.txt_search_text.get())
-
-    def on_double_click_item(self, event: tk.Event):
-        file = self.cnt_treeview.get_current_item().get("text").replace("\\","/")
-        os.startfile(file)
 
     def toggle_search(self):
         if self.btn_search['state'] == "disabled":
@@ -306,6 +310,8 @@ class TreeViewContainer(tk.Frame):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        
+        self.configure(bg='white')
 
         # Treeview style (Important: use a monospaced font like 'Consolas' -> for use with calculation of minwidth)
         style = ttk.Style()
@@ -315,10 +321,11 @@ class TreeViewContainer(tk.Frame):
         # The actual TreeView
         self.tvw_results = ttk.Treeview(self, style = "mystyle.Treeview")
         self.insert = self.tvw_results.insert
+        self.move = self.tvw_results.move
         
         self.tvw_results.grid(row = 0, column = 0, sticky="NSEW")
         self.tvw_results.column("#0", minwidth = 0, stretch = tk.YES)
-        self.tvw_results.heading("#0", text = "Found results", anchor = tk.W)
+        self.tvw_results.heading("#0", text = "Found results", anchor = tk.W, command = lambda : self.treeview_sort(True))
 
         # Scrollbars + attach scrollbars to TreeView
         sb_vertical = tk.Scrollbar(self, orient = "vertical", command = self.tvw_results.yview)
@@ -339,9 +346,19 @@ class TreeViewContainer(tk.Frame):
         # Note that the callback will be executed before the focus in the tree changed, i.e. you will get the item that was selected before 
         # you clicked the new item. One way to solve this is to use the event type ButtonRelease instead.
         self.tvw_results.bind("<ButtonRelease-1>", method)
-    
-    def bind_double_click(self, method):
-        self.tvw_results.bind("<Double-Button-1>", method)
+        
+    def treeview_sort(self, reverse):
+        col = "#0"
+        
+        l = [(self.tvw_results.item(k)["text"], k) for k in self.tvw_results.get_children()]
+        l.sort(reverse = reverse)
+        
+        # rearrange items in sorted positions
+        for index, (val, k) in enumerate(l):
+            self.tvw_results.move(k, '', index)
+            
+        # Reset heading action after sort
+        self.tvw_results.heading(col, command = lambda: self.treeview_sort(not reverse))
 
     def get_current_item(self) -> ttk.Treeview.item:
         current_item = self.tvw_results.focus()
@@ -355,11 +372,16 @@ class TextContainer(tk.Frame):
         txt_display (tk.Text): TreeView component
     """    
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)           
-
-        self.txt_display = tk.Text(self, width = 24, height = 13, wrap = "none", borderwidth = 0)
+        super().__init__(*args, **kwargs)
+        
+        self.txt_display = tk.Text(self, width = 24, height = 13, wrap = "none", borderwidth = 1)
         self.txt_display.configure(state = 'disabled')
-        self.txt_display.grid(row = 0, column = 0, sticky = "NSEW")        
+        self.txt_display.grid(row = 0, column = 0, sticky = "NSEW")
+        self.txt_display.bind("<Button-1>", self.on_single_click)
+        self.txt_display.bind("<Double-Button-1>", self.on_double_click)
+        self.txt_display.configure(bg='white')
+        self.file = ""
+
 
         # Scrollbars + attach scrollbars to Text
         sb_vertical = tk.Scrollbar(self, orient = "vertical", command = self.txt_display.yview)
@@ -375,14 +397,13 @@ class TextContainer(tk.Frame):
     def insert_text(self, text: list[str]):
         """ Remarks:
             - We need to enable the widget to be able to insert text.
-            - The addition of newlines '\n' is needed for better output
             - Clear the widget before a new insert
         """
         self.txt_display.configure(state = "normal")
         self.txt_display.delete('1.0',tk.END)
 
         for txt in text:
-            self.txt_display.insert(tk.END, txt + "\n")        
+            self.txt_display.insert(tk.END, txt)        
                 
         self.txt_display.configure(state = "disabled")
 
@@ -403,10 +424,42 @@ class TextContainer(tk.Frame):
                 idx = lastidx
 
         self.txt_display.tag_config("found", background="yellow", foreground="black")
-
+        
+    def get_current_line(self) -> (int, int):
+        # Retrieve line based on cursor position
+        begin_pos = self.txt_display.index("current linestart")
+        end_pos = self.txt_display.index("current lineend")
+        return (begin_pos, end_pos)
+        
+    def get_current_line_txt(self) -> str:
+        # Retrieve text based on cursor position
+        position = self.get_current_line()
+        return self.txt_display.get(position[0], position[1])
+        
+    def on_single_click(self,key):
+        # Highlight current selected line
+        position = self.get_current_line()
+        self.txt_display.tag_remove("current", '1.0', tk.END)
+        self.txt_display.tag_add("current", position[0], "current lineend+1c")
+        self.txt_display.tag_config("current", background="lightblue", foreground="black")
+        
+    def on_double_click(self, key):
+        txt = self.get_current_line_txt()
+        
+        if txt:
+            # Get line number (index before ':')
+            colon_idx = txt.find(":")
+            line_number = txt[0:colon_idx]            
+            subprocess.Popen(["C:/myapps/wscite/SciTE.exe", self.file,"-goto:" + line_number])
 
 
 # Main processing
 if __name__ == "__main__":
-    guiBuilder = GuiBuilder()
-    guiBuilder.create()
+	# Log everything to file
+	logging.basicConfig(filename = 'error.log', encoding = 'utf-8', format = '%(asctime)s %(levelname)-8s %(message)s', datefmt = '%Y-%m-%d %H:%M:%S', level = logging.DEBUG)
+	logger = logging.getLogger(__name__)
+	
+	#~ logger.debug("Main started")
+		
+	guiBuilder = GuiBuilder()
+	guiBuilder.create()
