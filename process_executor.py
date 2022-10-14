@@ -20,10 +20,10 @@ class PyProcessExecutor(threading.Thread):
         q (queue.Queue)
     """
 
-    SENTINEL = "_end"
+    SENTINEL = ProcessResult("_end", [])
 
     def __init__(self, input: tuple[str,str,str], q: queue.Queue):
-        super(PyProcessExecutor, self).__init__()
+        super(PyProcessExecutor, self).__init__(daemon = True)
         
         self._path = input[0]
         self._file_type = input[1]
@@ -33,12 +33,12 @@ class PyProcessExecutor(threading.Thread):
         self._stop_event = threading.Event()
 
         # Logging config
-        logging.basicConfig(filename="err.log", format="%(asctime)s %(message)s", filemode="a")
-        self.logger=logging.getLogger()
-        self.logger.setLevel(logging.ERROR)
+        self.logger = logging.getLogger(__name__)
 
     def run(self):
         files = []
+        
+        #~ self.logger.debug("run started")
 
         # Split file types
         ftypes = self._file_type.split(",")        
@@ -62,7 +62,7 @@ class PyProcessExecutor(threading.Thread):
                 self._q.put(result)
 
         # Indicate end of result 
-        self._q.put(ProcessResult(PyProcessExecutor.SENTINEL, []))  
+        self._q.put(PyProcessExecutor.SENTINEL)  
 
     def stop(self):
         self._stop_event.set()
