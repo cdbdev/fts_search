@@ -8,3 +8,5 @@ Windows search however is too cumbersome.
 # Remarks
 
 Currently only tested on Windows.
+
+Deprecated.
